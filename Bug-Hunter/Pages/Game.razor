@@ -1,10 +1,9 @@
-﻿
+﻿@page "/game"
 @inject NavigationManager Nav
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject BugHunter.Services.GameService Games
 
-Nav.NavigateTo("game");
 
 <div class="game-wrap">
     @if (!_started)
