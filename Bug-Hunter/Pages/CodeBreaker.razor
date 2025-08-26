@@ -1,0 +1,317 @@
+﻿@page "/codebreaker"
+
+@inject BugHunter.Services.CodeBreakerService Svc
+
+
+<div class="cb-wrap">
+    <h1>🧩 Code Breaker</h1>
+    <p class="subtitle">Devine le mot (5 lettres) en 6 essais.</p>
+
+    <div class="cb-opts">
+        <label>Niveau :</label>
+        <select @bind="Level">
+            <option value="@BugHunter.Services.CBLevel.Easy">Facile</option>
+            <option value="@BugHunter.Services.CBLevel.Normal">Normal</option>
+            <option value="@BugHunter.Services.CBLevel.Hard">Difficile</option>
+        </select>
+
+        <span class="hint-badge">Indices restants : @HintsLeft</span>
+    </div>
+
+    <div class="cb-hints">
+        <button class="btn secondary" @onclick="HintCategory" disabled="@(!CanUseHint)">Catégorie</button>
+        <button class="btn secondary" @onclick="HintClue" disabled="@(!CanUseHint)">Indice texte</button>
+        <button class="btn secondary" @onclick="HintLetter" disabled="@(!CanUseHint)">Révéler une lettre</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(HintText))
+    {
+        <p class="cb-msg">@HintText</p>
+    }
+
+    <div class="cb-board">
+        @for (int r = 0; r < Rows; r++)
+        {
+            <div class="cb-row">
+                @for (int c = 0; c < Cols; c++)
+                {
+                    var cell = Grid[r][c];
+                    var locked = Locked.ContainsKey(c) && r == RowIndex;
+                    <div class="cb-cell @cell.State @(locked ? "locked" : "")">@cell.Char</div>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="cb-input">
+        <input maxlength="5" @bind="CurrentGuess" @bind:event="oninput" placeholder="Tape ton essai…" class="cb-text" @onkeydown="OnKeyDown" />
+        <button class="btn" @onclick="Submit" disabled="@(!CanSubmit)">Valider</button>
+        <button class="btn secondary" @onclick="Reset">Rejouer</button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Message))
+    {
+        <p class="cb-msg">@Message</p>
+    }
+
+    <div class="kb">
+        @foreach (var row in KeyboardRows)
+        {
+            <div class="kb-row">
+                @foreach (var k in row)
+                {
+                    var cls = $"kb-key {(KeyStates.TryGetValue(k, out var s) ? s : "")}";
+                    <button class="@cls" @onclick="() => KeyPress(k)">@k</button>
+                }
+            </div>
+        }
+        <div class="kb-row">
+            <button class="kb-key wide" @onclick="Submit">Enter</button>
+            <button class="kb-key wide" @onclick="Backspace">⌫</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    const int Rows = 6, Cols = 5;
+
+    public class Cell { public char Char; public string State = ""; }
+    List<List<Cell>> Grid = new();
+
+    string Target = "";
+    string Category = "";
+    string? Clue = null;
+
+    int RowIndex = 0;
+    string CurrentGuess = "";
+    string? Message;
+    string? HintText;
+
+    bool Won = false, Lost = false;
+
+    BugHunter.Services.CBLevel Level = BugHunter.Services.CBLevel.Normal;
+    int HintsLeft = 0;
+
+    // Lettres verrouillées (position -> lettre)
+    Dictionary<int, char> Locked = new();
+
+    string[][] KeyboardRows = new[] {
+    new [] { "Q","W","E","R","T","Y","U","I","O","P" },
+    new [] { "A","S","D","F","G","H","J","K","L" },
+    new [] { "Z","X","C","V","B","N","M" }
+  };
+    Dictionary<string, string> KeyStates = new();
+
+    protected override void OnInitialized() => Reset();
+
+    void Reset()
+    {
+        Grid = Enumerable.Range(0, Rows).Select(_ => Enumerable.Range(0, Cols).Select(_ => new Cell()).ToList()).ToList();
+        RowIndex = 0; CurrentGuess = ""; Won = Lost = false; Message = null; HintText = null;
+        KeyStates.Clear(); Locked.Clear();
+
+        var info = Svc.PickWord(Level);
+        Target = info.Word.ToUpperInvariant();
+        Category = info.Category;
+        Clue = info.Clue;
+
+        HintsLeft = Level switch
+        {
+            BugHunter.Services.CBLevel.Easy => 2,
+            BugHunter.Services.CBLevel.Normal => 1,
+            _ => 0
+        };
+        StateHasChanged();
+    }
+
+    bool CanSubmit => !Won && !Lost && CurrentGuess.Length == Cols && MatchesLocked();
+    bool CanUseHint => !Won && !Lost && HintsLeft > 0;
+
+    bool MatchesLocked()
+    {
+        var g = (CurrentGuess ?? "").ToUpperInvariant().PadRight(Cols);
+        foreach (var kv in Locked)
+        {
+            if (g[kv.Key] != kv.Value) return false;
+        }
+        return true;
+    }
+
+    async Task Submit()
+    {
+        if (!CanSubmit) return;
+
+        var guess = CurrentGuess.ToUpperInvariant();
+        if (!Svc.IsValid(guess))
+        {
+            Message = "Mot invalide.";
+            StateHasChanged();
+            return;
+        }
+
+        var tchars = Target.ToCharArray();
+        var gchars = guess.ToCharArray();
+        var result = new string[Cols];
+        var used = new bool[Cols];
+
+        // 1) correct (verts)
+        for (int i = 0; i < Cols; i++)
+            if (gchars[i] == tchars[i]) { result[i] = "correct"; used[i] = true; }
+
+        // 2) present (jaunes)
+        for (int i = 0; i < Cols; i++)
+        {
+            if (result[i] == "correct") continue;
+
+            int foundIndex = -1;
+            for (int j = 0; j < Cols; j++)
+            {
+                if (!used[j] && tchars[j] == gchars[i]) { foundIndex = j; break; }
+            }
+
+            if (foundIndex >= 0) { result[i] = "present"; used[foundIndex] = true; }
+            else result[i] = "absent";
+        }
+
+        // Appliquer dans la grille + clavier
+        for (int c = 0; c < Cols; c++)
+        {
+            Grid[RowIndex][c].Char = gchars[c];
+            Grid[RowIndex][c].State = result[c];
+
+            var key = gchars[c].ToString();
+            if (!KeyStates.TryGetValue(key, out var prev)) prev = "";
+            KeyStates[key] = Better(prev, result[c]);
+        }
+
+        if (guess == Target)
+        {
+            Won = true; Message = $"🎉 Bravo ! Mot: {Target}";
+        }
+        else
+        {
+            RowIndex++;
+            if (RowIndex >= Rows)
+            {
+                Lost = true; Message = $"😅 Perdu ! Mot: {Target}";
+            }
+            else
+            {
+                Message = null;
+            }
+        }
+
+        CurrentGuess = "";
+        StateHasChanged();
+    }
+
+    string Better(string prev, string next)
+      => prev == "correct" ? "correct"
+       : next == "correct" ? "correct"
+       : (prev == "present" && next == "absent" ? "present" : next);
+
+    void KeyPress(string k)
+    {
+        if (Won || Lost) return;
+        k = k.ToUpperInvariant();
+        if (k.Length == 1 && char.IsLetter(k[0]))
+        {
+            if (CurrentGuess.Length < Cols)
+            {
+                var newGuess = (CurrentGuess + k).ToUpperInvariant();
+                CurrentGuess = newGuess;
+            }
+        }
+    }
+
+    void Backspace()
+    {
+        if (Won || Lost) return;
+        if (CurrentGuess.Length > 0)
+            CurrentGuess = CurrentGuess[..^1];
+    }
+
+    Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (Won || Lost) return Task.CompletedTask;
+        var k = e.Key?.ToUpperInvariant() ?? "";
+        if (k == "ENTER") return Submit();
+        if (k == "BACKSPACE") { Backspace(); StateHasChanged(); return Task.CompletedTask; }
+        if (k.Length == 1 && k[0] >= 'A' && k[0] <= 'Z')
+        {
+            if (CurrentGuess.Length < Cols)
+            {
+                var newGuess = (CurrentGuess + k).ToUpperInvariant();
+                CurrentGuess = newGuess;
+                StateHasChanged();
+            }
+        }
+        return Task.CompletedTask;
+    }
+
+    // ----- Indices -----
+    void ConsumeHint()
+    {
+        if (HintsLeft > 0) HintsLeft--;
+    }
+
+    void HintCategory()
+    {
+        if (!CanUseHint) return;
+        ConsumeHint();
+        HintText = $"Catégorie : {Category}";
+    }
+
+    void HintClue()
+    {
+        if (!CanUseHint) return;
+        if (!string.IsNullOrWhiteSpace(Clue))
+        {
+            ConsumeHint();
+            HintText = $"Indice : {Clue}";
+        }
+        else
+        {
+            HintText = "Pas d’indice texte pour ce mot.";
+        }
+    }
+
+    void OnLevelSelect(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<BugHunter.Services.CBLevel>(e.Value?.ToString(), out var lvl))
+        {
+            Level = lvl;
+            Reset();
+        }
+    }
+
+
+    void HintLetter()
+    {
+        if (!CanUseHint) return;
+
+        // Choisit une position non révélée et non verrouillée pour afficher la bonne lettre
+        var unrevealed = Enumerable.Range(0, Cols)
+          .Where(i => !Locked.ContainsKey(i) && (RowIndex >= Rows || Grid[RowIndex][i].State == ""))
+          .ToList();
+
+        if (unrevealed.Count == 0) { HintText = "Aucune lettre disponible."; return; }
+
+        var pos = Random.Shared.Next(unrevealed.Count);
+        var idx = unrevealed[pos];
+
+        var letter = Target[idx];
+        Locked[idx] = letter; // verrouille la position
+
+        // Pré-remplit la ligne courante visuellement (optionnel)
+        if (RowIndex < Rows)
+        {
+            Grid[RowIndex][idx].Char = letter;
+            Grid[RowIndex][idx].State = ""; // pas validé encore
+        }
+
+        ConsumeHint();
+        HintText = $"Lettre révélée : position {idx + 1} = '{letter}' (cette lettre doit être présente à cette position).";
+        StateHasChanged();
+    }
+}

@@ -1,0 +1,55 @@
+﻿@page "/"
+@inject NavigationManager Nav
+
+
+<div class="home">
+    <h1 class="title">🎮 Dev Arcade</h1>
+    <p class="subtitle">Trois mini‑jeux .NET/Blazor à tester dans le navigateur. Choisis ton défi 👇</p>
+
+
+    <div class="grid">
+        <a class="card" href="/game">
+            <div class="card-emoji">🐛</div>
+            <h2>Bug Hunter</h2>
+            <p>Vise et clique les bugs (NullRef, SQLi…). Score & combo en 60–90s.</p>
+            <ul class="meta">
+                <li>Canvas 2D</li>
+                <li>JS interop</li>
+                <li>Mobile OK</li>
+            </ul>
+        </a>
+
+
+        <a class="card" href="/invaders">
+            <div class="card-emoji">👾</div>
+            <h2>C# Invaders</h2>
+            <p>Déplace le vaisseau (←/→), tire (Espace). Vagues d’invaders, vies & pause.</p>
+            <ul class="meta">
+                <li>Canvas 2D</li>
+                <li>Clavier & mobile</li>
+                <li>Collisions AABB</li>
+            </ul>
+        </a>
+
+
+        <a class="card" href="/codebreaker">
+            <div class="card-emoji">🧩</div>
+            <h2>Code Breaker</h2>
+            <p>Wordle‑like 5 lettres (vocab dev). Niveaux & indices (catégorie, lettre).</p>
+            <ul class="meta">
+                <li>Razor pur</li>
+                <li>Clavier visuel</li>
+                <li>Hints & verrou</li>
+            </ul>
+        </a>
+    </div>
+
+
+    <div class="links">
+        <a class="btn" href="https://github.com/<ton-user>/<ton-repo>" target="_blank" rel="noopener">Code source</a>
+        <a class="btn secondary" href="@Nav.BaseUri" target="_blank" rel="noopener">Demo Pages</a>
+    </div>
+
+
+    <footer class="credits">Fait avec ❤️ en .NET & Blazor — © 2025 Sam FOKAM</footer>
+</div>
