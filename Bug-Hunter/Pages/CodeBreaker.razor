@@ -5,23 +5,27 @@
 
 <div class="cb-wrap">
     <h1>🧩 Code Breaker</h1>
-    <p class="subtitle">Devine le mot (5 lettres) en 6 essais.</p>
+    <p class="subtitle">Devine le mot (5 lettres) en 6 essais. <!-- Score/chrono --></p>
+
+    <div class="cb-session">
+        <span class="cb-score">Score: @TotalScore</span>
+        <span class="cb-timer">⏱️ @SecondsLeft s</span>
+    </div>
 
     <div class="cb-opts">
         <label>Niveau :</label>
-        <select @bind="Level">
+        <select @bind="Level" disabled="@SessionOver">
             <option value="@BugHunter.Services.CBLevel.Easy">Facile</option>
             <option value="@BugHunter.Services.CBLevel.Normal">Normal</option>
             <option value="@BugHunter.Services.CBLevel.Hard">Difficile</option>
         </select>
-
         <span class="hint-badge">Indices restants : @HintsLeft</span>
     </div>
 
     <div class="cb-hints">
-        <button class="btn secondary" @onclick="HintCategory" disabled="@(!CanUseHint)">Catégorie</button>
-        <button class="btn secondary" @onclick="HintClue" disabled="@(!CanUseHint)">Indice texte</button>
-        <button class="btn secondary" @onclick="HintLetter" disabled="@(!CanUseHint)">Révéler une lettre</button>
+        <button class="btn secondary" @onclick="HintCategory" disabled="@(!CanUseHint || SessionOver)">Catégorie</button>
+        <button class="btn secondary" @onclick="HintClue" disabled="@(!CanUseHint || SessionOver)">Indice texte</button>
+        <button class="btn secondary" @onclick="HintLetter">Révéler une lettre</button>
     </div>
 
     @if (!string.IsNullOrEmpty(HintText))
@@ -36,7 +40,7 @@
                 @for (int c = 0; c < Cols; c++)
                 {
                     var cell = Grid[r][c];
-                    var locked = Locked.ContainsKey(c) && r == RowIndex;
+                    var locked = Locked.ContainsKey(c) && r == RowIndex && !RoundOver && !SessionOver;
                     <div class="cb-cell @cell.State @(locked ? "locked" : "")">@cell.Char</div>
                 }
             </div>
@@ -44,14 +48,44 @@
     </div>
 
     <div class="cb-input">
-        <input maxlength="5" @bind="CurrentGuess" @bind:event="oninput" placeholder="Tape ton essai…" class="cb-text" @onkeydown="OnKeyDown" />
-        <button class="btn" @onclick="Submit" disabled="@(!CanSubmit)">Valider</button>
-        <button class="btn secondary" @onclick="Reset">Rejouer</button>
+        <input maxlength="5"
+               @bind="CurrentGuess"
+               placeholder="Tape ton essai…"
+               class="cb-text"
+               @onkeydown="OnKeyDown"
+               disabled="@RoundOver" />
+
+        <button class="btn @(CanSubmit ? "success" : "")"
+                @onclick="Submit"
+                disabled="@(!CanSubmit || RoundOver || SessionOver)">
+            Valider
+        </button>
+
+        <button class="btn secondary" @onclick="ResetRound" disabled="@SessionOver">Recommencer le mot</button>
     </div>
 
     @if (!string.IsNullOrEmpty(Message))
     {
         <p class="cb-msg">@Message</p>
+    }
+
+    @if (RoundOver && !SessionOver)
+    {
+        <div class="cb-next">
+            <p class="cb-msg"><strong>Continuer ?</strong> Passer au mot suivant pour enchaîner et marquer plus de points.</p>
+            <button class="btn" @onclick="NextWord">Mot suivant</button>
+        </div>
+    }
+
+    @if (SessionOver)
+    {
+        <div class="overlay">
+            <div class="panel">
+                <h2>⏱️ Temps écoulé</h2>
+                <p>Score total : <strong>@TotalScore</strong></p>
+                <button class="btn" @onclick="RestartSession">Relancer une session (90s)</button>
+            </div>
+        </div>
     }
 
     <div class="kb">
@@ -61,13 +95,13 @@
                 @foreach (var k in row)
                 {
                     var cls = $"kb-key {(KeyStates.TryGetValue(k, out var s) ? s : "")}";
-                    <button class="@cls" @onclick="() => KeyPress(k)">@k</button>
+                    <button class="@cls" @onclick="() => KeyPress(k)" disabled="@RoundOver || SessionOver">@k</button>
                 }
             </div>
         }
         <div class="kb-row">
-            <button class="kb-key wide" @onclick="Submit">Enter</button>
-            <button class="kb-key wide" @onclick="Backspace">⌫</button>
+            <button class="kb-key wide" @onclick="Submit" disabled="@(!CanSubmit || RoundOver || SessionOver)">Enter</button>
+            <button class="kb-key wide" @onclick="Backspace" disabled="@RoundOver || SessionOver">⌫</button>
         </div>
     </div>
 </div>
@@ -75,6 +109,7 @@
 @code {
     const int Rows = 6, Cols = 5;
 
+    // --- Grille / état du round ---
     public class Cell { public char Char; public string State = ""; }
     List<List<Cell>> Grid = new();
 
@@ -88,6 +123,7 @@
     string? HintText;
 
     bool Won = false, Lost = false;
+    bool RoundOver => Won || Lost;
 
     BugHunter.Services.CBLevel Level = BugHunter.Services.CBLevel.Normal;
     int HintsLeft = 0;
@@ -95,6 +131,13 @@
     // Lettres verrouillées (position -> lettre)
     Dictionary<int, char> Locked = new();
 
+    // --- Session (chrono + score cumulés) ---
+    int SecondsLeft = 90;
+    int TotalScore = 0;
+    bool SessionOver = false;
+    CancellationTokenSource? _timerCts;
+
+    // Clavier visuel
     string[][] KeyboardRows = new[] {
     new [] { "Q","W","E","R","T","Y","U","I","O","P" },
     new [] { "A","S","D","F","G","H","J","K","L" },
@@ -102,11 +145,57 @@
   };
     Dictionary<string, string> KeyStates = new();
 
-    protected override void OnInitialized() => Reset();
-
-    void Reset()
+    protected override void OnInitialized()
     {
-        Grid = Enumerable.Range(0, Rows).Select(_ => Enumerable.Range(0, Cols).Select(_ => new Cell()).ToList()).ToList();
+        ResetSession(); // démarre une nouvelle session (score=0, chrono=90s)
+    }
+
+    // ===== Session / Timer =====
+    void ResetSession()
+    {
+        // stop ancien timer
+        _timerCts?.Cancel();
+        _timerCts = new CancellationTokenSource();
+
+        TotalScore = 0;
+        SecondsLeft = 90;
+        SessionOver = false;
+
+        ResetRound(); // nouveau mot selon Level
+        _ = RunTimerAsync(_timerCts.Token);
+    }
+
+    async Task RunTimerAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested && SecondsLeft > 0)
+            {
+                await Task.Delay(1000, ct);
+                if (ct.IsCancellationRequested) break;
+                SecondsLeft--;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (TaskCanceledException) { /* ignore */ }
+
+        if (SecondsLeft <= 0 && !ct.IsCancellationRequested)
+        {
+            SessionOver = true;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    void RestartSession() => ResetSession();
+
+    // ===== Round =====
+    void OnLevelChanged(BugHunter.Services.CBLevel _) { if (!SessionOver) ResetRound(); }
+
+    void ResetRound()
+    {
+        Grid = Enumerable.Range(0, Rows)
+              .Select(_ => Enumerable.Range(0, Cols).Select(_ => new Cell()).ToList())
+              .ToList();
         RowIndex = 0; CurrentGuess = ""; Won = Lost = false; Message = null; HintText = null;
         KeyStates.Clear(); Locked.Clear();
 
@@ -124,30 +213,60 @@
         StateHasChanged();
     }
 
-    bool CanSubmit => !Won && !Lost && CurrentGuess.Length == Cols && MatchesLocked();
-    bool CanUseHint => !Won && !Lost && HintsLeft > 0;
+    void NextWord()
+    {
+        if (SessionOver) return;
+        ResetRound();
+    }
+
+    bool CanSubmit => !Won && !Lost && !SessionOver
+                      && (CurrentGuess?.Length ?? 0) == Cols
+                      && MatchesLocked();
+
+    bool CanUseHint => !Won && !Lost && !SessionOver && HintsLeft > 0;
 
     bool MatchesLocked()
     {
         var g = (CurrentGuess ?? "").ToUpperInvariant().PadRight(Cols);
         foreach (var kv in Locked)
-        {
             if (g[kv.Key] != kv.Value) return false;
-        }
         return true;
     }
 
+    // ===== Saisie =====
+    void KeyPress(string k)
+    {
+        if (RoundOver || SessionOver) return;
+        k = k.ToUpperInvariant();
+        if (k.Length == 1 && char.IsLetter(k[0]) && (CurrentGuess?.Length ?? 0) < Cols)
+            CurrentGuess = (CurrentGuess + k).ToUpperInvariant();
+    }
+
+    void Backspace()
+    {
+        if (RoundOver || SessionOver) return;
+        if (!string.IsNullOrEmpty(CurrentGuess))
+            CurrentGuess = CurrentGuess[..^1];
+    }
+
+    Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (RoundOver || SessionOver) return Task.CompletedTask;
+        var k = e.Key?.ToUpperInvariant() ?? "";
+        if (k == "ENTER") return Submit();
+        if (k == "BACKSPACE") { Backspace(); StateHasChanged(); }
+        return Task.CompletedTask;
+    }
+
+    // ===== Submit + Scoring =====
     async Task Submit()
     {
         if (!CanSubmit) return;
 
-        var guess = CurrentGuess.ToUpperInvariant();
-        if (!Svc.IsValid(guess))
-        {
-            Message = "Mot invalide.";
-            StateHasChanged();
-            return;
-        }
+        var guess = (CurrentGuess ?? "").ToUpperInvariant();
+        bool isValid = Svc.IsValid(guess);
+        if (!isValid)
+            Message = "Mot hors dictionnaire — essai compté quand même.";
 
         var tchars = Target.ToCharArray();
         var gchars = guess.ToCharArray();
@@ -158,7 +277,7 @@
         for (int i = 0; i < Cols; i++)
             if (gchars[i] == tchars[i]) { result[i] = "correct"; used[i] = true; }
 
-        // 2) present (jaunes)
+        // 2) present (jaunes) sinon absent (gris)
         for (int i = 0; i < Cols; i++)
         {
             if (result[i] == "correct") continue;
@@ -173,7 +292,7 @@
             else result[i] = "absent";
         }
 
-        // Appliquer dans la grille + clavier
+        // Applique dans la grille + clavier
         for (int c = 0; c < Cols; c++)
         {
             Grid[RowIndex][c].Char = gchars[c];
@@ -184,20 +303,30 @@
             KeyStates[key] = Better(prev, result[c]);
         }
 
+        // --- Scoring ---
+        int correct = result.Count(s => s == "correct");
+        int present = result.Count(s => s == "present");
+        int gained = correct * 2 + present * 1;     // points par essai
+        if (guess == Target) gained += 10;          // bonus si trouvé
+        TotalScore += gained;
+
+        // Victoire / progression
         if (guess == Target)
         {
-            Won = true; Message = $"🎉 Bravo ! Mot: {Target}";
+            Won = true;
+            Message = $"🎉 Bravo ! Mot: {Target}  (+{gained} pts)";
         }
         else
         {
             RowIndex++;
             if (RowIndex >= Rows)
             {
-                Lost = true; Message = $"😅 Perdu ! Mot: {Target}";
+                Lost = true;
+                Message ??= $"😅 Perdu ! Mot: {Target}  (+{gained} pts)";
             }
             else
             {
-                Message = null;
+                if (isValid) Message = null;
             }
         }
 
@@ -210,108 +339,46 @@
        : next == "correct" ? "correct"
        : (prev == "present" && next == "absent" ? "present" : next);
 
-    void KeyPress(string k)
-    {
-        if (Won || Lost) return;
-        k = k.ToUpperInvariant();
-        if (k.Length == 1 && char.IsLetter(k[0]))
-        {
-            if (CurrentGuess.Length < Cols)
-            {
-                var newGuess = (CurrentGuess + k).ToUpperInvariant();
-                CurrentGuess = newGuess;
-            }
-        }
-    }
-
-    void Backspace()
-    {
-        if (Won || Lost) return;
-        if (CurrentGuess.Length > 0)
-            CurrentGuess = CurrentGuess[..^1];
-    }
-
-    Task OnKeyDown(KeyboardEventArgs e)
-    {
-        if (Won || Lost) return Task.CompletedTask;
-        var k = e.Key?.ToUpperInvariant() ?? "";
-        if (k == "ENTER") return Submit();
-        if (k == "BACKSPACE") { Backspace(); StateHasChanged(); return Task.CompletedTask; }
-        if (k.Length == 1 && k[0] >= 'A' && k[0] <= 'Z')
-        {
-            if (CurrentGuess.Length < Cols)
-            {
-                var newGuess = (CurrentGuess + k).ToUpperInvariant();
-                CurrentGuess = newGuess;
-                StateHasChanged();
-            }
-        }
-        return Task.CompletedTask;
-    }
-
-    // ----- Indices -----
-    void ConsumeHint()
-    {
-        if (HintsLeft > 0) HintsLeft--;
-    }
-
-    void HintCategory()
-    {
-        if (!CanUseHint) return;
-        ConsumeHint();
-        HintText = $"Catégorie : {Category}";
-    }
-
+    // ===== Indices =====
+    void ConsumeHint() { if (HintsLeft > 0) HintsLeft--; }
+    void HintCategory() { if (!CanUseHint) return; ConsumeHint(); HintText = $"Catégorie : {Category}"; }
     void HintClue()
     {
         if (!CanUseHint) return;
-        if (!string.IsNullOrWhiteSpace(Clue))
-        {
-            ConsumeHint();
-            HintText = $"Indice : {Clue}";
-        }
-        else
-        {
-            HintText = "Pas d’indice texte pour ce mot.";
-        }
+        if (!string.IsNullOrWhiteSpace(Clue)) { ConsumeHint(); HintText = $"Indice : {Clue}"; }
+        else HintText = "Pas d’indice texte pour ce mot.";
     }
-
-    void OnLevelSelect(ChangeEventArgs e)
-    {
-        if (Enum.TryParse<BugHunter.Services.CBLevel>(e.Value?.ToString(), out var lvl))
-        {
-            Level = lvl;
-            Reset();
-        }
-    }
-
 
     void HintLetter()
     {
         if (!CanUseHint) return;
 
-        // Choisit une position non révélée et non verrouillée pour afficher la bonne lettre
         var unrevealed = Enumerable.Range(0, Cols)
-          .Where(i => !Locked.ContainsKey(i) && (RowIndex >= Rows || Grid[RowIndex][i].State == ""))
+          .Where(i => !Locked.ContainsKey(i))
           .ToList();
-
         if (unrevealed.Count == 0) { HintText = "Aucune lettre disponible."; return; }
 
         var pos = Random.Shared.Next(unrevealed.Count);
         var idx = unrevealed[pos];
-
         var letter = Target[idx];
+
         Locked[idx] = letter; // verrouille la position
 
-        // Pré-remplit la ligne courante visuellement (optionnel)
         if (RowIndex < Rows)
         {
             Grid[RowIndex][idx].Char = letter;
-            Grid[RowIndex][idx].State = ""; // pas validé encore
+            Grid[RowIndex][idx].State = "";
         }
 
         ConsumeHint();
-        HintText = $"Lettre révélée : position {idx + 1} = '{letter}' (cette lettre doit être présente à cette position).";
+        HintText = $"Lettre révélée : position {idx + 1} = '{letter}'.";
         StateHasChanged();
+    }
+
+    public void DisposeTimer() => _timerCts?.Cancel();
+    public async ValueTask DisposeAsync()
+    {
+        _timerCts?.Cancel();
+        await Task.CompletedTask;
     }
 }

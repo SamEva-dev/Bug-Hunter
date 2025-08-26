@@ -8,26 +8,24 @@ public class CodeBreakerService
 {
     private static readonly WordInfo[] Words = new[]
     {
-        new WordInfo("CLASS","C#", CBLevel.Easy,   "Type C# de base"),
-        new WordInfo("EVENT","C#", CBLevel.Normal, "Pattern d'abonnement"),
-        new WordInfo("CACHE","Cloud", CBLevel.Easy,"Stockage rapide en mémoire"),
-        new WordInfo("DOCKER","DevOps", CBLevel.Hard, "Conteneurisation (5 lettres?)".Replace("5","6")), // gardons 5 lettres ailleurs
-        new WordInfo("TOKEN","Web", CBLevel.Normal,"Auth: JWT, accès…"),
-        new WordInfo("INDEX","DB",  CBLevel.Easy,  "Accélère les requêtes"),
-        new WordInfo("QUEUE","Cloud",CBLevel.Normal,"FIFO, messages"),
-        new WordInfo("AZURE","Cloud",CBLevel.Normal,"Cloud Microsoft"),
-        new WordInfo("DEBUG","Dev", CBLevel.Easy,  "F8, breakpoints…"),
-        new WordInfo("MERGE","Git", CBLevel.Normal,"Fusion de branches"),
-        new WordInfo("SOLID","Arch",CBLevel.Hard,  "5 principes d’OO"),
-        new WordInfo("REACT","Web", CBLevel.Hard,  "Librairie UI JS"),
-        new WordInfo("LINQX","C#",  CBLevel.Hard,  "Requêtes dans le langage"),
-        new WordInfo("ARRAY","C#",  CBLevel.Easy,  "Structure indexée"),
-        new WordInfo("STATE","Arch",CBLevel.Normal,"Machine… pattern…"),
-        new WordInfo("ERROR","Dev", CBLevel.Easy,  "Exception, stacktrace…"),
-        new WordInfo("RANGE","C#",  CBLevel.Normal,"[start..end)"),
-        new WordInfo("BYTES","Sys", CBLevel.Normal,"Unités binaires"),
-        new WordInfo("MONGO","DB",  CBLevel.Normal,"Base NoSQL"),
-        new WordInfo("REDIS","DB",  CBLevel.Easy,  "Cache clé/valeur"),
+        new WordInfo("CLASS","C#",     CBLevel.Easy,   "Type C# de base"),
+        new WordInfo("EVENT","C#",     CBLevel.Normal, "Pattern d'abonnement"),
+        new WordInfo("CACHE","Cloud",  CBLevel.Easy,   "Stockage rapide en mémoire"),
+        new WordInfo("TOKEN","Web",    CBLevel.Normal, "Auth: JWT, accès…"),
+        new WordInfo("INDEX","DB",     CBLevel.Easy,   "Accélère les requêtes"),
+        new WordInfo("QUEUE","Cloud",  CBLevel.Normal, "FIFO, messages"),
+        new WordInfo("AZURE","Cloud",  CBLevel.Normal, "Cloud Microsoft"),
+        new WordInfo("DEBUG","Dev",    CBLevel.Easy,   "Breakpoints, pas à pas…"),
+        new WordInfo("MERGE","Git",    CBLevel.Normal, "Fusion de branches"),
+        new WordInfo("SOLID","Arch",   CBLevel.Hard,   "5 principes d’OO"),
+        new WordInfo("REACT","Web",    CBLevel.Hard,   "Librairie UI JS"),
+        new WordInfo("ARRAY","C#",     CBLevel.Easy,   "Structure indexée"),
+        new WordInfo("STATE","Arch",   CBLevel.Normal, "Machine d'états / store"),
+        new WordInfo("ERROR","Dev",    CBLevel.Easy,   "Exception, stacktrace…"),
+        new WordInfo("RANGE","C#",     CBLevel.Normal, "[start..end)"),
+        new WordInfo("BYTES","Sys",    CBLevel.Normal, "Unités binaires"),
+        new WordInfo("MONGO","DB",     CBLevel.Normal, "Base NoSQL"),
+        new WordInfo("REDIS","DB",     CBLevel.Easy,   "Cache clé/valeur"),
     }.Where(w => w.Word.Length == 5).ToArray();
 
     private static readonly HashSet<string> Dict = Words.Select(w => w.Word).ToHashSet();
@@ -39,5 +37,6 @@ public class CodeBreakerService
         return pool[r];
     }
 
-    public bool IsValid(string guess) => guess.Length == 5 && Dict.Contains(guess.ToUpperInvariant());
+    public bool IsValid(string guess)
+        => guess.Length == 5 && Dict.Contains(guess.ToUpperInvariant());
 }
