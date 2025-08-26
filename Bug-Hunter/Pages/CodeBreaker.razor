@@ -1,6 +1,8 @@
-﻿@page "/codebreaker"
-
+﻿
+@inject NavigationManager Nav
 @inject BugHunter.Services.CodeBreakerService Svc
+
+Nav.NavigateTo("codebreaker");
 
 
 <div class="cb-wrap">
