@@ -1,0 +1,67 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  PROJECT_PATH: Bug-Hunter/Bug-Hunter.csproj   # adapte si besoin
+  REPO_NAME: Bug-Hunter                        # EXACTEMENT le nom du repo (casse incluse)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore & Publish (Blazor WASM)
+        run: |
+          dotnet restore
+          dotnet publish "$PROJECT_PATH" -c Release -o build/publish
+
+      - name: Add .nojekyll (needed for _framework)
+        run: |
+          touch build/publish/wwwroot/.nojekyll
+
+      - name: Fix <base href> for GitHub Pages
+        run: |
+          index_file="build/publish/wwwroot/index.html"
+          if [ -f "$index_file" ]; then
+            # remplace <base href="/"> quel que soit le format auto-fermant
+            sed -i 's|<base href="/" */>|<base href="/'"${REPO_NAME}"'/" />|g' "$index_file"
+            sed -i 's|<base href="/" *>|<base href="/'"${REPO_NAME}"'/" />|g' "$index_file"
+          fi
+
+      # Optionnel : fallback SPA pour les routes côté client
+      - name: Add 404.html fallback (SPA routing)
+        run: |
+          cp build/publish/wwwroot/index.html build/publish/wwwroot/404.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/publish/wwwroot
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
